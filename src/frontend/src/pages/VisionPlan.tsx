@@ -3,10 +3,11 @@ import {
   Edit,
   Eye,
   Lightbulb,
+  Loader2,
   Plus,
   Trash2,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { VisionContents } from "../backend";
 import { Button } from "../components/ui/button";
 import {
@@ -33,6 +34,7 @@ import {
 import { Textarea } from "../components/ui/textarea";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
+import { useActor } from "../hooks/useActor";
 
 const sectionOptions = [
   {
@@ -65,8 +67,9 @@ const emptySection = (): VisionContents => ({
 });
 
 function getSectionIcon(key: string) {
+  const base = key.split("-")[0];
   return (
-    sectionOptions.find((s) => s.key === key)?.icon ?? (
+    sectionOptions.find((s) => s.key === base)?.icon ?? (
       <Eye className="w-5 h-5" />
     )
   );
@@ -75,32 +78,64 @@ function getSectionIcon(key: string) {
 export default function VisionPlan() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
+  const { actor } = useActor();
   const [sections, setSections] = useState<VisionContents[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<VisionContents>(emptySection());
   const [isNew, setIsNew] = useState(false);
 
-  const handleSave = useCallback(() => {
-    if (isNew) {
-      setSections((prev) =>
-        [...prev, form].sort((a, b) => Number(a.order - b.order)),
-      );
-    } else {
-      setSections((prev) =>
-        prev
-          .map((s) => (s.sectionKey === form.sectionKey ? form : s))
-          .sort((a, b) => Number(a.order - b.order)),
-      );
+  const loadSections = useCallback(async () => {
+    if (!actor) return;
+    setLoading(true);
+    try {
+      const data = await actor.getAllVisionContent();
+      setSections([...data].sort((a, b) => Number(a.order - b.order)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-    setEditOpen(false);
-  }, [form, isNew]);
+  }, [actor]);
+
+  useEffect(() => {
+    loadSections();
+  }, [loadSections]);
+
+  const handleSave = useCallback(async () => {
+    if (!actor) return;
+    setSaving(true);
+    try {
+      if (isNew) {
+        const uniqueKey = `${form.sectionKey}-${Date.now()}`;
+        await actor.addVisionContent({ ...form, sectionKey: uniqueKey });
+      } else {
+        await actor.updateVisionContent(form);
+      }
+      setEditOpen(false);
+      await loadSections();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }, [form, isNew, actor, loadSections]);
 
   const handleDelete = useCallback(
-    (key: string) => {
+    async (sectionKey: string) => {
+      if (!actor) return;
       if (!confirm(t("confirmDelete"))) return;
-      setSections((prev) => prev.filter((s) => s.sectionKey !== key));
+      try {
+        await actor.deleteVisionContent(sectionKey);
+        await loadSections();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete.");
+      }
     },
-    [t],
+    [t, actor, loadSections],
   );
 
   return (
@@ -128,53 +163,60 @@ export default function VisionPlan() {
           </Button>
         )}
 
-        {sections.length === 0 && (
+        {loading && (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        )}
+
+        {!loading && sections.length === 0 && (
           <p className="text-center text-muted-foreground py-8">
             {t("noData")}
           </p>
         )}
 
-        {sections.map((sec) => (
-          <Card key={sec.sectionKey} className="overflow-hidden">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-base flex items-center gap-2">
-                <span className="text-primary">
-                  {getSectionIcon(sec.sectionKey)}
-                </span>
-                {lang === "ar" ? sec.titleAr : sec.titleEn}
-                {isAdmin && (
-                  <div className="ml-auto flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => {
-                        setForm({ ...sec });
-                        setIsNew(false);
-                        setEditOpen(true);
-                      }}
-                    >
-                      <Edit className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => handleDelete(sec.sectionKey)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <p className="text-sm text-muted-foreground whitespace-pre-line">
-                {lang === "ar" ? sec.bodyAr : sec.bodyEn}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+        {!loading &&
+          sections.map((sec) => (
+            <Card key={sec.sectionKey} className="overflow-hidden">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <span className="text-primary">
+                    {getSectionIcon(sec.sectionKey)}
+                  </span>
+                  {lang === "ar" ? sec.titleAr : sec.titleEn}
+                  {isAdmin && (
+                    <div className="ml-auto flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setForm({ ...sec });
+                          setIsNew(false);
+                          setEditOpen(true);
+                        }}
+                      >
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => handleDelete(sec.sectionKey)}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <p className="text-sm text-muted-foreground whitespace-pre-line">
+                  {lang === "ar" ? sec.bodyAr : sec.bodyEn}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -187,7 +229,7 @@ export default function VisionPlan() {
             <div>
               <Label>{lang === "ar" ? "النوع" : "Type"}</Label>
               <Select
-                value={form.sectionKey}
+                value={form.sectionKey.split("-")[0]}
                 onValueChange={(v) => setForm((f) => ({ ...f, sectionKey: v }))}
               >
                 <SelectTrigger>
@@ -249,7 +291,10 @@ export default function VisionPlan() {
               />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button onClick={handleSave} className="flex-1">
+              <Button onClick={handleSave} className="flex-1" disabled={saving}>
+                {saving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : null}
                 {t("save")}
               </Button>
               <Button

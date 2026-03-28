@@ -42,44 +42,10 @@ import { Textarea } from "../components/ui/textarea";
 import { loadConfig } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
+import { useActor } from "../hooks/useActor";
 import { StorageClient } from "../utils/StorageClient";
 
 const now = () => BigInt(Date.now()) * 1000000n;
-
-let nextId = 100n;
-
-const STORAGE_KEY = "gcm_education_posts";
-
-// BigInt-safe JSON serialization
-function bigintReplacer(_key: string, value: unknown) {
-  if (typeof value === "bigint") return `__bigint__${value.toString()}`;
-  return value;
-}
-
-function bigintReviver(_key: string, value: unknown) {
-  if (typeof value === "string" && value.startsWith("__bigint__")) {
-    return BigInt(value.slice(10));
-  }
-  return value;
-}
-
-function savePosts(posts: EducationPost[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(posts, bigintReplacer));
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function loadPosts(): EducationPost[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw, bigintReviver) as EducationPost[];
-  } catch {
-    return [];
-  }
-}
 
 const emptyPost = (): EducationPost => ({
   id: 0n,
@@ -111,7 +77,10 @@ function toYoutubeEmbed(url: string): string {
 export default function EducationHub() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
-  const [posts, setPosts] = useState<EducationPost[]>(() => loadPosts());
+  const { actor } = useActor();
+  const [posts, setPosts] = useState<EducationPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [selected, setSelected] = useState<EducationPost | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -121,30 +90,64 @@ export default function EducationHub() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Persist posts to localStorage whenever they change
+  const loadPosts = useCallback(async () => {
+    if (!actor) return;
+    setLoading(true);
+    try {
+      const data = await actor.getAllEducationPosts();
+      setPosts(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [actor]);
+
   useEffect(() => {
-    savePosts(posts);
-  }, [posts]);
+    loadPosts();
+  }, [loadPosts]);
 
   const filtered =
     filter === "all" ? posts : posts.filter((p) => p.postType === filter);
 
-  const handleSave = useCallback(() => {
-    if (isNew) {
-      const newPost: EducationPost = { ...form, id: nextId++ };
-      setPosts((prev) => [...prev, newPost]);
-    } else {
-      setPosts((prev) => prev.map((p) => (p.id === form.id ? form : p)));
+  const handleSave = useCallback(async () => {
+    if (!actor) return;
+    setSaving(true);
+    try {
+      if (isNew) {
+        const newPost: EducationPost = {
+          ...form,
+          id: 0n,
+          isPublished: true,
+          publishedAt: now(),
+        };
+        await actor.addEducationPost(newPost);
+      } else {
+        await actor.updateEducationPost(form);
+      }
+      setEditOpen(false);
+      await loadPosts();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
     }
-    setEditOpen(false);
-  }, [form, isNew]);
+  }, [form, isNew, actor, loadPosts]);
 
   const handleDelete = useCallback(
-    (id: bigint) => {
+    async (id: bigint) => {
+      if (!actor) return;
       if (!confirm(t("confirmDelete"))) return;
-      setPosts((prev) => prev.filter((p) => p.id !== id));
+      try {
+        await actor.deleteEducationPost(id);
+        await loadPosts();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete.");
+      }
     },
-    [t],
+    [t, actor, loadPosts],
   );
 
   const handleAddUrl = useCallback(() => {
@@ -227,7 +230,15 @@ export default function EducationHub() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {filtered.length === 0 && (
+        {loading && (
+          <div
+            className="flex justify-center py-8"
+            data-ocid="education.loading_state"
+          >
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        )}
+        {!loading && filtered.length === 0 && (
           <p
             className="text-center text-muted-foreground py-8"
             data-ocid="education.empty_state"
@@ -235,73 +246,74 @@ export default function EducationHub() {
             {t("noData")}
           </p>
         )}
-        {filtered.map((post, index) => (
-          <Card
-            key={String(post.id)}
-            data-ocid={`education.item.${index + 1}`}
-            className="cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => setSelected(post)}
-          >
-            <CardContent className="p-3">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge
-                      variant="secondary"
-                      className="text-xs flex items-center gap-1"
-                    >
-                      {typeIcons[post.postType]}
-                      {t(post.postType)}
-                    </Badge>
-                    {!post.isPublished && (
-                      <Badge variant="outline" className="text-xs">
-                        {t("draft")}
+        {!loading &&
+          filtered.map((post, index) => (
+            <Card
+              key={String(post.id)}
+              data-ocid={`education.item.${index + 1}`}
+              className="cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setSelected(post)}
+            >
+              <CardContent className="p-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge
+                        variant="secondary"
+                        className="text-xs flex items-center gap-1"
+                      >
+                        {typeIcons[post.postType]}
+                        {t(post.postType)}
                       </Badge>
-                    )}
+                      {!post.isPublished && (
+                        <Badge variant="outline" className="text-xs">
+                          {t("draft")}
+                        </Badge>
+                      )}
+                    </div>
+                    <h3 className="font-medium text-sm">
+                      {lang === "ar" ? post.titleAr : post.titleEn}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t("author")}: {post.authorName}
+                    </p>
                   </div>
-                  <h3 className="font-medium text-sm">
-                    {lang === "ar" ? post.titleAr : post.titleEn}
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {t("author")}: {post.authorName}
-                  </p>
+                  {isAdmin && (
+                    <div
+                      className="flex gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        data-ocid={`education.edit_button.${index + 1}`}
+                        onClick={() => {
+                          setForm({ ...post, mediaUrls: [...post.mediaUrls] });
+                          setIsNew(false);
+                          setUrlInput("");
+                          setEditOpen(true);
+                        }}
+                      >
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        data-ocid={`education.delete_button.${index + 1}`}
+                        onClick={() => handleDelete(post.id)}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {isAdmin && (
-                  <div
-                    className="flex gap-1"
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    role="presentation"
-                  >
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      data-ocid={`education.edit_button.${index + 1}`}
-                      onClick={() => {
-                        setForm({ ...post, mediaUrls: [...post.mediaUrls] });
-                        setIsNew(false);
-                        setUrlInput("");
-                        setEditOpen(true);
-                      }}
-                    >
-                      <Edit className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
-                      data-ocid={`education.delete_button.${index + 1}`}
-                      onClick={() => handleDelete(post.id)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
       </div>
 
       {/* View Sheet */}
@@ -469,7 +481,6 @@ export default function EducationHub() {
             <div>
               <Label className="mb-2 block">{t("mediaUrls")}</Label>
 
-              {/* Current URLs list */}
               {form.mediaUrls.length > 0 && (
                 <div className="space-y-1 mb-2">
                   {form.mediaUrls.map((url) => (
@@ -495,7 +506,6 @@ export default function EducationHub() {
                 </div>
               )}
 
-              {/* Add URL manually */}
               <div className="flex gap-1 mb-2">
                 <Input
                   value={urlInput}
@@ -522,7 +532,6 @@ export default function EducationHub() {
                 </Button>
               </div>
 
-              {/* File upload (only for video/photo) */}
               {canUploadFile && (
                 <>
                   <input
@@ -569,8 +578,11 @@ export default function EducationHub() {
                 onClick={handleSave}
                 className="flex-1"
                 data-ocid="education.submit_button"
-                disabled={uploadProgress !== null}
+                disabled={uploadProgress !== null || saving}
               >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : null}
                 {t("save")}
               </Button>
               <Button

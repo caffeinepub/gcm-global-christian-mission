@@ -3,12 +3,13 @@ import {
   Download,
   Edit,
   ImagePlus,
+  Loader2,
   MapPin,
   Plus,
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Event } from "../backend";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -24,6 +25,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
+import { useActor } from "../hooks/useActor";
 
 const fmtDate = (ns: bigint) => {
   const ms = Number(ns / 1000000n);
@@ -49,8 +51,6 @@ const generateIcs = (event: Event, lang: "en" | "ar") => {
   URL.revokeObjectURL(url);
 };
 
-let nextId = 100n;
-
 const emptyEvent = (): Event => ({
   id: 0n,
   titleEn: "",
@@ -61,14 +61,17 @@ const emptyEvent = (): Event => ({
   locationEn: "",
   locationAr: "",
   isPublished: true,
-  createdAt: BigInt(Date.now()) * 1000000n,
+  createdAt: 0n,
   imageUrl: "",
 });
 
 export default function Events() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
+  const { actor } = useActor();
   const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showPast, setShowPast] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<Event>(emptyEvent());
@@ -77,6 +80,23 @@ export default function Events() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadEvents = useCallback(async () => {
+    if (!actor) return;
+    setLoading(true);
+    try {
+      const data = await actor.getAllEvents();
+      setEvents(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [actor]);
+
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
 
   const nowNs = BigInt(Date.now()) * 1000000n;
   const displayed = events
@@ -100,28 +120,48 @@ export default function Events() {
     }
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
+    if (!actor) return;
+    setSaving(true);
     const evtToSave: Event = {
       ...form,
       dateTime: BigInt(new Date(dateInput).getTime()) * 1000000n,
     };
-    if (isNew) {
-      setEvents((prev) => [...prev, { ...evtToSave, id: nextId++ }]);
-    } else {
-      setEvents((prev) =>
-        prev.map((e) => (e.id === evtToSave.id ? evtToSave : e)),
-      );
+    try {
+      if (isNew) {
+        const newId = await actor.addEvent({
+          ...evtToSave,
+          id: 0n,
+          createdAt: 0n,
+        });
+        await actor.updateEvent({ ...evtToSave, id: newId, isPublished: true });
+      } else {
+        await actor.updateEvent(evtToSave);
+      }
+      setEditOpen(false);
+      setImagePreview(null);
+      await loadEvents();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
     }
-    setEditOpen(false);
-    setImagePreview(null);
-  }, [form, isNew, dateInput]);
+  }, [form, isNew, dateInput, actor, loadEvents]);
 
   const handleDelete = useCallback(
-    (id: bigint) => {
+    async (id: bigint) => {
+      if (!actor) return;
       if (!confirm(t("confirmDelete"))) return;
-      setEvents((prev) => prev.filter((e) => e.id !== id));
+      try {
+        await actor.deleteEvent(id);
+        await loadEvents();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete.");
+      }
     },
-    [t],
+    [t, actor, loadEvents],
   );
 
   const openEdit = (evt: Event) => {
@@ -177,73 +217,79 @@ export default function Events() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {displayed.length === 0 && (
+        {loading && (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        )}
+        {!loading && displayed.length === 0 && (
           <p className="text-center text-muted-foreground py-8">
             {t("noData")}
           </p>
         )}
-        {displayed.map((evt) => (
-          <Card key={String(evt.id)} className="overflow-hidden">
-            <CardContent className="p-3">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-sm">
-                    {lang === "ar" ? evt.titleAr : evt.titleEn}
-                  </h3>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                    <CalendarDays className="w-3 h-3" />
-                    {fmtDate(evt.dateTime)}
-                  </p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    {lang === "ar" ? evt.locationAr : evt.locationEn}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                    {lang === "ar" ? evt.descriptionAr : evt.descriptionEn}
-                  </p>
+        {!loading &&
+          displayed.map((evt) => (
+            <Card key={String(evt.id)} className="overflow-hidden">
+              <CardContent className="p-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-sm">
+                      {lang === "ar" ? evt.titleAr : evt.titleEn}
+                    </h3>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                      <CalendarDays className="w-3 h-3" />
+                      {fmtDate(evt.dateTime)}
+                    </p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />
+                      {lang === "ar" ? evt.locationAr : evt.locationEn}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {lang === "ar" ? evt.descriptionAr : evt.descriptionEn}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1 ml-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7"
+                      onClick={() => generateIcs(evt, lang)}
+                    >
+                      <Download className="w-3 h-3 mr-1" />
+                      {t("addToCalendar")}
+                    </Button>
+                    {isAdmin && (
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openEdit(evt)}
+                        >
+                          <Edit className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDelete(evt.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1 ml-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs h-7"
-                    onClick={() => generateIcs(evt, lang)}
-                  >
-                    <Download className="w-3 h-3 mr-1" />
-                    {t("addToCalendar")}
-                  </Button>
-                  {isAdmin && (
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => openEdit(evt)}
-                      >
-                        <Edit className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive"
-                        onClick={() => handleDelete(evt.id)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {evt.imageUrl && (
-                <img
-                  src={evt.imageUrl}
-                  alt=""
-                  className="w-full mt-2 rounded-lg h-24 object-cover"
-                />
-              )}
-            </CardContent>
-          </Card>
-        ))}
+                {evt.imageUrl && (
+                  <img
+                    src={evt.imageUrl}
+                    alt=""
+                    className="w-full mt-2 rounded-lg h-24 object-cover"
+                  />
+                )}
+              </CardContent>
+            </Card>
+          ))}
       </div>
 
       <Dialog
@@ -385,8 +431,11 @@ export default function Events() {
               <Button
                 onClick={handleSave}
                 className="flex-1"
-                disabled={uploadingImage}
+                disabled={uploadingImage || saving}
               >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : null}
                 {t("save")}
               </Button>
               <Button

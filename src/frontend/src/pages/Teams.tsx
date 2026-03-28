@@ -1,5 +1,5 @@
-import { Edit, ImageIcon, Plus, Trash2, Users } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { Edit, ImageIcon, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Team } from "../backend";
 import { TeamsCategory } from "../backend";
 import { Button } from "../components/ui/button";
@@ -15,8 +15,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
-
-let nextId = 100n;
+import { useActor } from "../hooks/useActor";
 
 const emptyTeam = (): Team => ({
   id: 0n,
@@ -32,12 +31,32 @@ const emptyTeam = (): Team => ({
 export default function Teams() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
+  const { actor } = useActor();
   const [teams, setTeams] = useState<Team[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState<Team>(emptyTeam());
   const [isNew, setIsNew] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const loadTeams = useCallback(async () => {
+    if (!actor) return;
+    setLoading(true);
+    try {
+      const data = await actor.getAllTeams();
+      setTeams([...data].sort((a, b) => Number(a.order - b.order)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [actor]);
+
+  useEffect(() => {
+    loadTeams();
+  }, [loadTeams]);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -51,30 +70,39 @@ export default function Teams() {
     reader.readAsDataURL(file);
   };
 
-  const handleSave = useCallback(() => {
-    if (isNew) {
-      setTeams((prev) =>
-        [...prev, { ...form, id: nextId++ }].sort((a, b) =>
-          Number(a.order - b.order),
-        ),
-      );
-    } else {
-      setTeams((prev) =>
-        prev
-          .map((team) => (team.id === form.id ? form : team))
-          .sort((a, b) => Number(a.order - b.order)),
-      );
+  const handleSave = useCallback(async () => {
+    if (!actor) return;
+    setSaving(true);
+    try {
+      if (isNew) {
+        await actor.addTeam({ ...form, id: 0n });
+      } else {
+        await actor.updateTeam(form);
+      }
+      setEditOpen(false);
+      setPhotoPreview(null);
+      await loadTeams();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
     }
-    setEditOpen(false);
-    setPhotoPreview(null);
-  }, [form, isNew]);
+  }, [form, isNew, actor, loadTeams]);
 
   const handleDelete = useCallback(
-    (id: bigint) => {
+    async (id: bigint) => {
+      if (!actor) return;
       if (!confirm(t("confirmDelete"))) return;
-      setTeams((prev) => prev.filter((team) => team.id !== id));
+      try {
+        await actor.deleteTeam(id);
+        await loadTeams();
+      } catch (err) {
+        console.error(err);
+        alert("Failed to delete.");
+      }
     },
-    [t],
+    [t, actor, loadTeams],
   );
 
   return (
@@ -98,62 +126,70 @@ export default function Teams() {
           )}
         </div>
 
-        {teams.length === 0 && (
+        {loading && (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          </div>
+        )}
+
+        {!loading && teams.length === 0 && (
           <p className="text-center text-muted-foreground py-8">
             {t("noData")}
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          {teams.map((team) => (
-            <Card key={String(team.id)} className="overflow-hidden">
-              <div className="bg-primary/10 h-24 flex items-center justify-center">
-                {team.mediaUrls?.[0] ? (
-                  <img
-                    src={team.mediaUrls[0]}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <Users className="w-8 h-8 text-primary/50" />
-                )}
-              </div>
-              <CardContent className="p-2">
-                <h3 className="font-medium text-xs leading-tight">
-                  {lang === "ar" ? team.nameAr : team.nameEn}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                  {lang === "ar" ? team.descriptionAr : team.descriptionEn}
-                </p>
-                {isAdmin && (
-                  <div className="flex gap-1 mt-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => {
-                        setForm({ ...team, mediaUrls: [...team.mediaUrls] });
-                        setPhotoPreview(team.mediaUrls?.[0] ?? null);
-                        setIsNew(false);
-                        setEditOpen(true);
-                      }}
-                    >
-                      <Edit className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive"
-                      onClick={() => handleDelete(team.id)}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        {!loading && (
+          <div className="grid grid-cols-2 gap-3">
+            {teams.map((team) => (
+              <Card key={String(team.id)} className="overflow-hidden">
+                <div className="bg-primary/10 h-24 flex items-center justify-center">
+                  {team.mediaUrls?.[0] ? (
+                    <img
+                      src={team.mediaUrls[0]}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Users className="w-8 h-8 text-primary/50" />
+                  )}
+                </div>
+                <CardContent className="p-2">
+                  <h3 className="font-medium text-xs leading-tight">
+                    {lang === "ar" ? team.nameAr : team.nameEn}
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                    {lang === "ar" ? team.descriptionAr : team.descriptionEn}
+                  </p>
+                  {isAdmin && (
+                    <div className="flex gap-1 mt-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          setForm({ ...team, mediaUrls: [...team.mediaUrls] });
+                          setPhotoPreview(team.mediaUrls?.[0] ?? null);
+                          setIsNew(false);
+                          setEditOpen(true);
+                        }}
+                      >
+                        <Edit className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive"
+                        onClick={() => handleDelete(team.id)}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       <Dialog
@@ -247,7 +283,10 @@ export default function Teams() {
               />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button onClick={handleSave} className="flex-1">
+              <Button onClick={handleSave} className="flex-1" disabled={saving}>
+                {saving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : null}
                 {t("save")}
               </Button>
               <Button
