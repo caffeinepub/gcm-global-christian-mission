@@ -65,7 +65,9 @@ const emptyEvent = (): Event => ({
   locationAr: "",
   isPublished: true,
   createdAt: 0n,
-  imageUrl: "",
+  imageUrl: undefined,
+  calendarLink: undefined,
+  image: undefined,
 });
 
 export default function Events() {
@@ -206,7 +208,7 @@ export default function Events() {
 
   const removeImage = () => {
     setImagePreview(null);
-    setForm((f) => ({ ...f, imageUrl: "" }));
+    setForm((f) => ({ ...f, imageUrl: undefined }));
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 

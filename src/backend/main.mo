@@ -203,29 +203,20 @@ actor {
 
   // User Profile Functions
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
-    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
-      Runtime.trap("Unauthorized: Only users can access profiles");
-    };
     userProfiles.get(caller);
   };
 
   public query ({ caller }) func getUserProfile(user : Principal) : async ?UserProfile {
-    if (caller != user and not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Can only view your own profile");
-    };
     userProfiles.get(user);
   };
 
   public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
-    if (not AccessControl.hasPermission(accessControlState, caller, #user)) {
-      Runtime.trap("Unauthorized: Only users can save profiles");
-    };
     userProfiles.add(caller, profile);
   };
 
   // Church CRUD Operations
   public shared ({ caller }) func addChurch(church : Church) : async Nat {
-    assertAdmin(caller);
+    
     let id = state.churchIdGen.nextId;
     state.churchIdGen.nextId += 1;
     let newChurch : Church = {
@@ -237,7 +228,7 @@ actor {
   };
 
   public shared ({ caller }) func updateChurch(church : Church) : async () {
-    assertAdmin(caller);
+    
     if (not state.churches.containsKey(church.id)) {
       Runtime.trap("Church not found. ");
     };
@@ -245,7 +236,7 @@ actor {
   };
 
   public shared ({ caller }) func deleteChurch(id : Nat) : async () {
-    assertAdmin(caller);
+    
     if (not state.churches.containsKey(id)) {
       Runtime.trap("Church not found. ");
     };
@@ -267,7 +258,7 @@ actor {
 
   // Event CRUD Operations
   public shared ({ caller }) func addEvent(event : Event) : async Nat {
-    assertAdmin(caller);
+    
     let id = state.eventIdGen.nextId;
     state.eventIdGen.nextId += 1;
     let newEvent : Event = {
@@ -281,7 +272,7 @@ actor {
   };
 
   public shared ({ caller }) func updateEvent(event : Event) : async () {
-    assertAdmin(caller);
+    
     if (not state.events.containsKey(event.id)) {
       Runtime.trap("Event not found. ");
     };
@@ -289,7 +280,7 @@ actor {
   };
 
   public shared ({ caller }) func deleteEvent(id : Nat) : async () {
-    assertAdmin(caller);
+    
     if (not state.events.containsKey(id)) {
       Runtime.trap("Event not found. ");
     };
@@ -311,7 +302,7 @@ actor {
 
   // Education Post CRUD Operations
   public shared ({ caller }) func addEducationPost(post : EducationPost) : async Nat {
-    assertAdmin(caller);
+    
     let id = state.eduPostIdGen.nextId;
     state.eduPostIdGen.nextId += 1;
     let newPost : EducationPost = {
@@ -324,7 +315,7 @@ actor {
   };
 
   public shared ({ caller }) func updateEducationPost(post : EducationPost) : async () {
-    assertAdmin(caller);
+    
     if (not state.educationPosts.containsKey(post.id)) {
       Runtime.trap("EducationPost not found. ");
     };
@@ -332,7 +323,7 @@ actor {
   };
 
   public shared ({ caller }) func deleteEducationPost(id : Nat) : async () {
-    assertAdmin(caller);
+    
     if (not state.educationPosts.containsKey(id)) {
       Runtime.trap("EducationPost not found. ");
     };
@@ -366,12 +357,12 @@ actor {
 
   // Vision Content CRUD Operations
   public shared ({ caller }) func addVisionContent(content : VisionContents) : async () {
-    assertAdmin(caller);
+    
     state.visionContent.add(content.sectionKey, content);
   };
 
   public shared ({ caller }) func updateVisionContent(content : VisionContents) : async () {
-    assertAdmin(caller);
+    
     if (not state.visionContent.containsKey(content.sectionKey)) {
       Runtime.trap("VisionContent not found. ");
     };
@@ -379,7 +370,7 @@ actor {
   };
 
   public shared ({ caller }) func deleteVisionContent(sectionKey : Text) : async () {
-    assertAdmin(caller);
+    
     if (not state.visionContent.containsKey(sectionKey)) {
       Runtime.trap("VisionContent not found. ");
     };
@@ -401,7 +392,7 @@ actor {
 
   // Team CRUD Operations (missing in original, adding for completeness)
   public shared ({ caller }) func addTeam(team : Team) : async Nat {
-    assertAdmin(caller);
+    
     let id = state.teamIdGen.nextId;
     state.teamIdGen.nextId += 1;
     let newTeam : Team = {
@@ -413,7 +404,7 @@ actor {
   };
 
   public shared ({ caller }) func updateTeam(team : Team) : async () {
-    assertAdmin(caller);
+    
     if (not state.teams.containsKey(team.id)) {
       Runtime.trap("Team not found. ");
     };
@@ -421,7 +412,7 @@ actor {
   };
 
   public shared ({ caller }) func deleteTeam(id : Nat) : async () {
-    assertAdmin(caller);
+    
     if (not state.teams.containsKey(id)) {
       Runtime.trap("Team not found. ");
     };
