@@ -1,0 +1,18 @@
+{
+  "name": "GCM",
+  "short_name": "GCM",
+  "description": "Global Christian Mission",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EFF6FF",
+  "theme_color": "#5B9BD5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/generated/gcm-icon-transparent.dim_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
