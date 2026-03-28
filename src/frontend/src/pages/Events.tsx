@@ -1,3 +1,4 @@
+import { HttpAgent } from "@dfinity/agent";
 import {
   CalendarDays,
   Download,
@@ -23,9 +24,11 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { loadConfig } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
+import { StorageClient } from "../utils/StorageClient";
 
 const fmtDate = (ns: bigint) => {
   const ms = Number(ns / 1000000n);
@@ -78,7 +81,7 @@ export default function Events() {
   const [isNew, setIsNew] = useState(false);
   const [dateInput, setDateInput] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadEvents = useCallback(async () => {
@@ -103,22 +106,40 @@ export default function Events() {
     .filter((e) => (showPast ? e.dateTime < nowNs : e.dateTime >= nowNs))
     .sort((a, b) => Number(a.dateTime - b.dateTime));
 
-  const handleImageUpload = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) return;
-    setUploadingImage(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        setImagePreview(dataUrl);
-        setForm((f) => ({ ...f, imageUrl: dataUrl }));
-        setUploadingImage(false);
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      setUploadingImage(false);
-    }
-  }, []);
+  const handleImageUpload = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("image/")) return;
+      setUploadProgress(0);
+      try {
+        const config = await loadConfig();
+        const agent = new HttpAgent({ host: config.backend_host });
+        const storageClient = new StorageClient(
+          config.bucket_name,
+          config.storage_gateway_url,
+          config.backend_canister_id,
+          config.project_id,
+          agent,
+        );
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { hash } = await storageClient.putFile(bytes, (pct) =>
+          setUploadProgress(pct),
+        );
+        const url = await storageClient.getDirectURL(hash);
+        setImagePreview(url);
+        setForm((f) => ({ ...f, imageUrl: url }));
+      } catch (err) {
+        console.error("Upload failed:", err);
+        alert(
+          lang === "ar"
+            ? "فشل الرفع. حاول مرة أخرى."
+            : "Upload failed. Please try again.",
+        );
+      } finally {
+        setUploadProgress(null);
+      }
+    },
+    [lang],
+  );
 
   const handleSave = useCallback(async () => {
     if (!actor) return;
@@ -188,6 +209,8 @@ export default function Events() {
     setForm((f) => ({ ...f, imageUrl: "" }));
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const isUploading = uploadProgress !== null;
 
   return (
     <div className="flex flex-col h-full">
@@ -385,21 +408,24 @@ export default function Events() {
                       alt="preview"
                       className="w-full h-32 object-cover rounded-lg border"
                     />
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-1 right-1 h-6 w-6"
-                      onClick={removeImage}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
+                    {!isUploading && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={removeImage}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <button
                     type="button"
                     className="w-full border-2 border-dashed border-muted-foreground/30 rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
                   >
                     <ImagePlus className="w-6 h-6 mx-auto mb-1 text-muted-foreground" />
                     <p className="text-xs text-muted-foreground">
@@ -419,10 +445,20 @@ export default function Events() {
                     if (file) handleImageUpload(file);
                   }}
                 />
-                {uploadingImage && (
-                  <p className="text-xs text-muted-foreground text-center">
-                    {lang === "ar" ? "جاري الرفع..." : "Uploading..."}
-                  </p>
+                {isUploading && (
+                  <div className="space-y-1">
+                    <div className="w-full bg-muted rounded-full h-1.5">
+                      <div
+                        className="bg-primary h-1.5 rounded-full transition-all"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">
+                      {lang === "ar"
+                        ? `جاري الرفع... ${Math.round(uploadProgress ?? 0)}%`
+                        : `Uploading... ${Math.round(uploadProgress ?? 0)}%`}
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
@@ -431,7 +467,7 @@ export default function Events() {
               <Button
                 onClick={handleSave}
                 className="flex-1"
-                disabled={uploadingImage || saving}
+                disabled={isUploading || saving}
               >
                 {saving ? (
                   <Loader2 className="w-4 h-4 mr-1 animate-spin" />

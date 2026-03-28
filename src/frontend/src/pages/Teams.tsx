@@ -1,3 +1,4 @@
+import { HttpAgent } from "@dfinity/agent";
 import { Edit, ImageIcon, Loader2, Plus, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Team } from "../backend";
@@ -13,9 +14,11 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { loadConfig } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
+import { StorageClient } from "../utils/StorageClient";
 
 const emptyTeam = (): Team => ({
   id: 0n,
@@ -39,6 +42,7 @@ export default function Teams() {
   const [form, setForm] = useState<Team>(emptyTeam());
   const [isNew, setIsNew] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadTeams = useCallback(async () => {
@@ -58,17 +62,41 @@ export default function Teams() {
     loadTeams();
   }, [loadTeams]);
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const url = ev.target?.result as string;
-      setPhotoPreview(url);
-      setForm((f) => ({ ...f, mediaUrls: [url] }));
-    };
-    reader.readAsDataURL(file);
-  };
+  const handlePhotoChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setUploadProgress(0);
+      try {
+        const config = await loadConfig();
+        const agent = new HttpAgent({ host: config.backend_host });
+        const storageClient = new StorageClient(
+          config.bucket_name,
+          config.storage_gateway_url,
+          config.backend_canister_id,
+          config.project_id,
+          agent,
+        );
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const { hash } = await storageClient.putFile(bytes, (pct) =>
+          setUploadProgress(pct),
+        );
+        const url = await storageClient.getDirectURL(hash);
+        setPhotoPreview(url);
+        setForm((f) => ({ ...f, mediaUrls: [url] }));
+      } catch (err) {
+        console.error("Upload failed:", err);
+        alert(
+          lang === "ar"
+            ? "فشل الرفع. حاول مرة أخرى."
+            : "Upload failed. Please try again.",
+        );
+      } finally {
+        setUploadProgress(null);
+      }
+    },
+    [lang],
+  );
 
   const handleSave = useCallback(async () => {
     if (!actor) return;
@@ -104,6 +132,8 @@ export default function Teams() {
     },
     [t, actor, loadTeams],
   );
+
+  const isUploading = uploadProgress !== null;
 
   return (
     <div className="flex flex-col h-full">
@@ -211,8 +241,10 @@ export default function Teams() {
               <Label>{lang === "ar" ? "صورة الفريق" : "Team Photo"}</Label>
               <div
                 className="mt-1 h-28 rounded-lg border-2 border-dashed border-border flex flex-col items-center justify-center cursor-pointer bg-muted/30 hover:bg-muted/50 transition-colors overflow-hidden"
-                onClick={() => fileRef.current?.click()}
-                onKeyDown={(e) => e.key === "Enter" && fileRef.current?.click()}
+                onClick={() => !isUploading && fileRef.current?.click()}
+                onKeyDown={(e) =>
+                  !isUploading && e.key === "Enter" && fileRef.current?.click()
+                }
               >
                 {photoPreview ? (
                   <img
@@ -220,6 +252,8 @@ export default function Teams() {
                     alt="preview"
                     className="w-full h-full object-cover"
                   />
+                ) : isUploading ? (
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
                 ) : (
                   <>
                     <ImageIcon className="w-8 h-8 text-muted-foreground mb-1" />
@@ -229,6 +263,21 @@ export default function Teams() {
                   </>
                 )}
               </div>
+              {isUploading && (
+                <div className="mt-1 space-y-1">
+                  <div className="w-full bg-muted rounded-full h-1.5">
+                    <div
+                      className="bg-primary h-1.5 rounded-full transition-all"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">
+                    {lang === "ar"
+                      ? `جاري الرفع... ${Math.round(uploadProgress ?? 0)}%`
+                      : `Uploading... ${Math.round(uploadProgress ?? 0)}%`}
+                  </p>
+                </div>
+              )}
               <input
                 ref={fileRef}
                 type="file"
@@ -283,7 +332,11 @@ export default function Teams() {
               />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button onClick={handleSave} className="flex-1" disabled={saving}>
+              <Button
+                onClick={handleSave}
+                className="flex-1"
+                disabled={isUploading || saving}
+              >
                 {saving ? (
                   <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                 ) : null}
