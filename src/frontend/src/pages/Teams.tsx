@@ -18,6 +18,7 @@ import { loadConfig } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { StorageClient } from "../utils/StorageClient";
 
 const emptyTeam = (): Team => ({
@@ -35,6 +36,7 @@ export default function Teams() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
   const { actor } = useActor();
+  const { identity } = useInternetIdentity();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -70,7 +72,7 @@ export default function Teams() {
       setUploadProgress(0);
       try {
         const config = await loadConfig();
-        const agent = new HttpAgent({ host: config.backend_host });
+        const agent = new HttpAgent({ host: config.backend_host, identity });
         const storageClient = new StorageClient(
           config.bucket_name,
           config.storage_gateway_url,
@@ -96,7 +98,7 @@ export default function Teams() {
         setUploadProgress(null);
       }
     },
-    [lang],
+    [lang, identity],
   );
 
   const handleSave = useCallback(async () => {
