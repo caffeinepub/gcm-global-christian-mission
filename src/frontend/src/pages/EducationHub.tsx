@@ -43,7 +43,6 @@ import { loadConfig } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
-import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import { StorageClient } from "../utils/StorageClient";
 
 const now = () => BigInt(Date.now()) * 1000000n;
@@ -87,7 +86,6 @@ export default function EducationHub() {
   const { isAdmin } = useAuth();
   const { lang, t } = useLang();
   const { actor } = useActor();
-  const { identity } = useInternetIdentity();
   const [posts, setPosts] = useState<EducationPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -174,34 +172,31 @@ export default function EducationHub() {
     }));
   }, []);
 
-  const handleFileUpload = useCallback(
-    async (file: File) => {
-      setUploadProgress(0);
-      try {
-        const config = await loadConfig();
-        const agent = new HttpAgent({ host: config.backend_host, identity });
-        const storageClient = new StorageClient(
-          config.bucket_name,
-          config.storage_gateway_url,
-          config.backend_canister_id,
-          config.project_id,
-          agent,
-        );
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const { hash } = await storageClient.putFile(bytes, (pct) =>
-          setUploadProgress(pct),
-        );
-        const url = await storageClient.getDirectURL(hash);
-        setForm((f) => ({ ...f, mediaUrls: [...f.mediaUrls, url] }));
-      } catch (err) {
-        console.error("Upload failed:", err);
-        alert("Upload failed. Please try again.");
-      } finally {
-        setUploadProgress(null);
-      }
-    },
-    [identity],
-  );
+  const handleFileUpload = useCallback(async (file: File) => {
+    setUploadProgress(0);
+    try {
+      const config = await loadConfig();
+      const agent = new HttpAgent({ host: config.backend_host });
+      const storageClient = new StorageClient(
+        config.bucket_name,
+        config.storage_gateway_url,
+        config.backend_canister_id,
+        config.project_id,
+        agent,
+      );
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { hash } = await storageClient.putFile(bytes, (pct) =>
+        setUploadProgress(pct),
+      );
+      const url = await storageClient.getDirectURL(hash);
+      setForm((f) => ({ ...f, mediaUrls: [...f.mediaUrls, url] }));
+    } catch (err) {
+      console.error("Upload failed:", err);
+      alert("Upload failed. Please try again.");
+    } finally {
+      setUploadProgress(null);
+    }
+  }, []);
 
   const canUploadFile =
     form.postType === Variant_video_text_photo.video ||
