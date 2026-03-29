@@ -43,6 +43,7 @@ export default function Teams() {
   const [isNew, setIsNew] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadTeams = useCallback(async () => {
@@ -171,7 +172,11 @@ export default function Teams() {
         {!loading && (
           <div className="grid grid-cols-2 gap-3">
             {teams.map((team) => (
-              <Card key={String(team.id)} className="overflow-hidden">
+              <Card
+                key={String(team.id)}
+                className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => !editOpen && setSelectedTeam(team)}
+              >
                 <div className="bg-primary/10 h-24 flex items-center justify-center">
                   {team.mediaUrls?.[0] ? (
                     <img
@@ -191,7 +196,12 @@ export default function Teams() {
                     {lang === "ar" ? team.descriptionAr : team.descriptionEn}
                   </p>
                   {isAdmin && (
-                    <div className="flex gap-1 mt-2">
+                    <div
+                      className="flex gap-1 mt-2"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
                       <Button
                         variant="ghost"
                         size="icon"
@@ -222,6 +232,35 @@ export default function Teams() {
         )}
       </div>
 
+      {/* Team Detail / Lightbox Dialog */}
+      <Dialog
+        open={!!selectedTeam}
+        onOpenChange={(open) => !open && setSelectedTeam(null)}
+      >
+        <DialogContent className="max-w-sm p-4">
+          {selectedTeam && (
+            <div>
+              {selectedTeam.mediaUrls?.[0] && (
+                <img
+                  src={selectedTeam.mediaUrls[0]}
+                  alt=""
+                  className="w-full rounded-lg object-contain max-h-[50vh] mb-3"
+                />
+              )}
+              <h3 className="font-semibold text-lg">
+                {lang === "ar" ? selectedTeam.nameAr : selectedTeam.nameEn}
+              </h3>
+              <p className="text-sm text-muted-foreground mt-2">
+                {lang === "ar"
+                  ? selectedTeam.descriptionAr
+                  : selectedTeam.descriptionEn}
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
       <Dialog
         open={editOpen}
         onOpenChange={(o) => {

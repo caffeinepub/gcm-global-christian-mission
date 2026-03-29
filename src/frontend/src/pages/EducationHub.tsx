@@ -67,10 +67,18 @@ const typeIcons = {
 };
 
 function toYoutubeEmbed(url: string): string {
-  const shortMatch = url.match(/youtu\.be\/([^?&]+)/);
-  if (shortMatch) return `https://www.youtube.com/embed/${shortMatch[1]}`;
+  // Handle youtu.be short URLs
+  const shortMatch = url.match(/youtu\.be\/([^?&/]+)/);
+  if (shortMatch) return `https://www.youtube.com/embed/${shortMatch[1]}?rel=0`;
+  // Handle youtube.com/watch?v=
   const watchMatch = url.match(/[?&]v=([^&]+)/);
-  if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}`;
+  if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}?rel=0`;
+  // Handle youtube.com/embed/ already
+  if (url.includes("youtube.com/embed/")) return url;
+  // Handle youtube.com/shorts/
+  const shortsMatch = url.match(/youtube\.com\/shorts\/([^?&/]+)/);
+  if (shortsMatch)
+    return `https://www.youtube.com/embed/${shortsMatch[1]}?rel=0`;
   return url;
 }
 
@@ -354,12 +362,14 @@ export default function EducationHub() {
                 if (isYoutube) {
                   return (
                     <iframe
-                      title="Media content"
+                      title="YouTube video"
                       key={url}
                       src={toYoutubeEmbed(url)}
                       className="w-full aspect-video mt-3 rounded-lg"
                       allowFullScreen
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      loading="lazy"
                     />
                   );
                 }
@@ -369,9 +379,12 @@ export default function EducationHub() {
                     <video
                       key={url}
                       controls
+                      playsInline
+                      preload="metadata"
                       className="w-full mt-3 rounded-lg"
                     >
                       <source src={url} />
+                      <source src={url} type="video/mp4" />
                     </video>
                   );
                 }

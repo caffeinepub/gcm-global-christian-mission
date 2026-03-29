@@ -84,6 +84,8 @@ export default function Events() {
   const [dateInput, setDateInput] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadEvents = useCallback(async () => {
@@ -254,7 +256,11 @@ export default function Events() {
         )}
         {!loading &&
           displayed.map((evt) => (
-            <Card key={String(evt.id)} className="overflow-hidden">
+            <Card
+              key={String(evt.id)}
+              className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setSelectedEvent(evt)}
+            >
               <CardContent className="p-3">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
@@ -273,7 +279,12 @@ export default function Events() {
                       {lang === "ar" ? evt.descriptionAr : evt.descriptionEn}
                     </p>
                   </div>
-                  <div className="flex flex-col gap-1 ml-2">
+                  <div
+                    className="flex flex-col gap-1 ml-2"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    role="presentation"
+                  >
                     <Button
                       variant="outline"
                       size="sm"
@@ -309,7 +320,17 @@ export default function Events() {
                   <img
                     src={evt.imageUrl}
                     alt=""
-                    className="w-full mt-2 rounded-lg h-24 object-cover"
+                    className="w-full mt-2 rounded-lg h-24 object-cover cursor-pointer"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        setLightboxUrl(evt.imageUrl!);
+                      }
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxUrl(evt.imageUrl!);
+                    }}
                   />
                 )}
               </CardContent>
@@ -317,6 +338,85 @@ export default function Events() {
           ))}
       </div>
 
+      {/* Image Lightbox */}
+      <Dialog
+        open={!!lightboxUrl}
+        onOpenChange={(open) => !open && setLightboxUrl(null)}
+      >
+        <DialogContent className="max-w-sm p-2">
+          {lightboxUrl && (
+            <img
+              src={lightboxUrl}
+              alt=""
+              className="w-full rounded-lg object-contain max-h-[80vh]"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Event Detail View */}
+      <Dialog
+        open={!!selectedEvent && !lightboxUrl}
+        onOpenChange={(open) => !open && setSelectedEvent(null)}
+      >
+        <DialogContent className="max-w-sm p-4">
+          {selectedEvent && (
+            <div>
+              <DialogHeader className="mb-3">
+                <DialogTitle className="text-base">
+                  {lang === "ar"
+                    ? selectedEvent.titleAr
+                    : selectedEvent.titleEn}
+                </DialogTitle>
+              </DialogHeader>
+              {selectedEvent.imageUrl && (
+                <img
+                  src={selectedEvent.imageUrl}
+                  alt=""
+                  className="w-full rounded-lg object-cover max-h-48 mb-3 cursor-pointer"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter")
+                      setLightboxUrl(selectedEvent.imageUrl!);
+                  }}
+                  onClick={() => setLightboxUrl(selectedEvent.imageUrl!)}
+                />
+              )}
+              <div className="space-y-2 text-sm">
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <CalendarDays className="w-4 h-4 shrink-0" />
+                  {fmtDate(selectedEvent.dateTime)}
+                </p>
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <MapPin className="w-4 h-4 shrink-0" />
+                  {lang === "ar"
+                    ? selectedEvent.locationAr
+                    : selectedEvent.locationEn}
+                </p>
+                {(lang === "ar"
+                  ? selectedEvent.descriptionAr
+                  : selectedEvent.descriptionEn) && (
+                  <p className="text-foreground/80 mt-2 whitespace-pre-wrap">
+                    {lang === "ar"
+                      ? selectedEvent.descriptionAr
+                      : selectedEvent.descriptionEn}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 w-full text-xs"
+                onClick={() => generateIcs(selectedEvent, lang)}
+              >
+                <Download className="w-3 h-3 mr-1" />
+                {t("addToCalendar")}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
       <Dialog
         open={editOpen}
         onOpenChange={(open) => {
