@@ -162,11 +162,24 @@ actor {
     name : Text;
   };
 
+  // ─── Stable storage for persistence across upgrades ───────────────────────
+  stable var _stableChurches : [Church] = [];
+  stable var _stableEvents : [Event] = [];
+  stable var _stableEducationPosts : [EducationPost] = [];
+  stable var _stableVisionContent : [VisionContents] = [];
+  stable var _stableTeams : [Team] = [];
+
+  stable var _stableChurchNextId : Nat = 1;
+  stable var _stableEventNextId : Nat = 1;
+  stable var _stableEduPostNextId : Nat = 1;
+  stable var _stableTeamNextId : Nat = 1;
+
+  // ─── In-memory runtime state ───────────────────────────────────────────────
   let state = {
-    var churchIdGen = { var nextId = 1 };
-    var eventIdGen = { var nextId = 1 };
-    var eduPostIdGen = { var nextId = 1 };
-    var teamIdGen = { var nextId = 1 };
+    var churchIdGen = { var nextId = _stableChurchNextId };
+    var eventIdGen = { var nextId = _stableEventNextId };
+    var eduPostIdGen = { var nextId = _stableEduPostNextId };
+    var teamIdGen = { var nextId = _stableTeamNextId };
     var referenceIdGen = { var nextId = 1 };
     var aboutAppIdGen = { var nextId = 1 };
     var socialMediaIdGen = { var nextId = 1 };
@@ -187,12 +200,43 @@ actor {
     var heroVideos = Map.empty<Nat, HeroVideo>();
   };
 
+  // ─── Restore from stable storage on first load ────────────────────────────
+  for (c in _stableChurches.vals()) { state.churches.add(c.id, c) };
+  for (e in _stableEvents.vals()) { state.events.add(e.id, e) };
+  for (p in _stableEducationPosts.vals()) { state.educationPosts.add(p.id, p) };
+  for (v in _stableVisionContent.vals()) { state.visionContent.add(v.sectionKey, v) };
+  for (t in _stableTeams.vals()) { state.teams.add(t.id, t) };
+
   // Initialize access control state
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
   include MixinStorage();
 
   let userProfiles = Map.empty<Principal, UserProfile>();
+
+  // ─── Upgrade hooks ─────────────────────────────────────────────────────────
+  system func preupgrade() {
+    _stableChurches := state.churches.values().toArray();
+    _stableEvents := state.events.values().toArray();
+    _stableEducationPosts := state.educationPosts.values().toArray();
+    _stableVisionContent := state.visionContent.values().toArray();
+    _stableTeams := state.teams.values().toArray();
+
+    _stableChurchNextId := state.churchIdGen.nextId;
+    _stableEventNextId := state.eventIdGen.nextId;
+    _stableEduPostNextId := state.eduPostIdGen.nextId;
+    _stableTeamNextId := state.teamIdGen.nextId;
+  };
+
+  system func postupgrade() {
+    // Data is already restored in actor body above;
+    // clear temp stable arrays to free memory
+    _stableChurches := [];
+    _stableEvents := [];
+    _stableEducationPosts := [];
+    _stableVisionContent := [];
+    _stableTeams := [];
+  };
 
   // Helper function to assert admin access
   func assertAdmin(caller : Principal) {
@@ -216,7 +260,6 @@ actor {
 
   // Church CRUD Operations
   public shared ({ caller }) func addChurch(church : Church) : async Nat {
-    
     let id = state.churchIdGen.nextId;
     state.churchIdGen.nextId += 1;
     let newChurch : Church = {
@@ -228,7 +271,6 @@ actor {
   };
 
   public shared ({ caller }) func updateChurch(church : Church) : async () {
-    
     if (not state.churches.containsKey(church.id)) {
       Runtime.trap("Church not found. ");
     };
@@ -236,7 +278,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteChurch(id : Nat) : async () {
-    
     if (not state.churches.containsKey(id)) {
       Runtime.trap("Church not found. ");
     };
@@ -244,7 +285,6 @@ actor {
   };
 
   public query ({ caller }) func getChurchById(id : Nat) : async Church {
-    // Guests can read
     switch (state.churches.get(id)) {
       case (null) { Runtime.trap("Church not found. ") };
       case (?church) { church };
@@ -252,27 +292,24 @@ actor {
   };
 
   public query ({ caller }) func getAllChurches() : async [Church] {
-    // Guests can read
     state.churches.values().toArray();
   };
 
   // Event CRUD Operations
   public shared ({ caller }) func addEvent(event : Event) : async Nat {
-    
     let id = state.eventIdGen.nextId;
     state.eventIdGen.nextId += 1;
     let newEvent : Event = {
       event with
       id;
       createdAt = getCurrentTime();
-      isPublished = false;
+      isPublished = true;
     };
     state.events.add(id, newEvent);
     id;
   };
 
   public shared ({ caller }) func updateEvent(event : Event) : async () {
-    
     if (not state.events.containsKey(event.id)) {
       Runtime.trap("Event not found. ");
     };
@@ -280,7 +317,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteEvent(id : Nat) : async () {
-    
     if (not state.events.containsKey(id)) {
       Runtime.trap("Event not found. ");
     };
@@ -288,7 +324,6 @@ actor {
   };
 
   public query ({ caller }) func getEventById(id : Nat) : async Event {
-    // Guests can read
     switch (state.events.get(id)) {
       case (null) { Runtime.trap("Event not found. ") };
       case (?event) { event };
@@ -296,26 +331,23 @@ actor {
   };
 
   public query ({ caller }) func getAllEvents() : async [Event] {
-    // Guests can read
     state.events.values().toArray().sort(compareByEventDateTime<Event>(func(e) { e.dateTime }));
   };
 
   // Education Post CRUD Operations
   public shared ({ caller }) func addEducationPost(post : EducationPost) : async Nat {
-    
     let id = state.eduPostIdGen.nextId;
     state.eduPostIdGen.nextId += 1;
     let newPost : EducationPost = {
       post with
       id;
-      isPublished = false;
+      isPublished = true;
     };
     state.educationPosts.add(id, newPost);
     id;
   };
 
   public shared ({ caller }) func updateEducationPost(post : EducationPost) : async () {
-    
     if (not state.educationPosts.containsKey(post.id)) {
       Runtime.trap("EducationPost not found. ");
     };
@@ -323,7 +355,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteEducationPost(id : Nat) : async () {
-    
     if (not state.educationPosts.containsKey(id)) {
       Runtime.trap("EducationPost not found. ");
     };
@@ -331,7 +362,6 @@ actor {
   };
 
   public query ({ caller }) func getEducationPostById(id : Nat) : async EducationPost {
-    // Guests can read
     switch (state.educationPosts.get(id)) {
       case (null) { Runtime.trap("EducationPost not found. ") };
       case (?post) { post };
@@ -339,13 +369,11 @@ actor {
   };
 
   public query ({ caller }) func getAllEducationPosts() : async [EducationPost] {
-    // Guests can read
     state.educationPosts.values().toArray().sort(compareByPublishedAt<EducationPost>(func(p) { p.publishedAt }));
   };
 
   // Bilingual-specific EducationPosts function
   public query ({ caller }) func getEducationPostsByLanguage(isArabic : Bool) : async [(Text, Text, ?[Text], Text)] {
-    // Guests can read
     state.educationPosts.values().map(func(post) {
       if (isArabic) {
         (post.titleAr, post.contentAr, ?post.mediaUrls, "ar");
@@ -357,12 +385,10 @@ actor {
 
   // Vision Content CRUD Operations
   public shared ({ caller }) func addVisionContent(content : VisionContents) : async () {
-    
     state.visionContent.add(content.sectionKey, content);
   };
 
   public shared ({ caller }) func updateVisionContent(content : VisionContents) : async () {
-    
     if (not state.visionContent.containsKey(content.sectionKey)) {
       Runtime.trap("VisionContent not found. ");
     };
@@ -370,7 +396,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteVisionContent(sectionKey : Text) : async () {
-    
     if (not state.visionContent.containsKey(sectionKey)) {
       Runtime.trap("VisionContent not found. ");
     };
@@ -378,7 +403,6 @@ actor {
   };
 
   public query ({ caller }) func getVisionContentBySectionKey(sectionKey : Text) : async VisionContents {
-    // Guests can read
     switch (state.visionContent.get(sectionKey)) {
       case (null) { Runtime.trap("VisionContent not found. ") };
       case (?content) { content };
@@ -386,13 +410,11 @@ actor {
   };
 
   public query ({ caller }) func getAllVisionContent() : async [VisionContents] {
-    // Guests can read
     state.visionContent.values().toArray().sort(compareByOrder<VisionContents>(func(c) { c.order }));
   };
 
-  // Team CRUD Operations (missing in original, adding for completeness)
+  // Team CRUD Operations
   public shared ({ caller }) func addTeam(team : Team) : async Nat {
-    
     let id = state.teamIdGen.nextId;
     state.teamIdGen.nextId += 1;
     let newTeam : Team = {
@@ -404,7 +426,6 @@ actor {
   };
 
   public shared ({ caller }) func updateTeam(team : Team) : async () {
-    
     if (not state.teams.containsKey(team.id)) {
       Runtime.trap("Team not found. ");
     };
@@ -412,7 +433,6 @@ actor {
   };
 
   public shared ({ caller }) func deleteTeam(id : Nat) : async () {
-    
     if (not state.teams.containsKey(id)) {
       Runtime.trap("Team not found. ");
     };
@@ -420,7 +440,6 @@ actor {
   };
 
   public query ({ caller }) func getTeamById(id : Nat) : async Team {
-    // Guests can read
     switch (state.teams.get(id)) {
       case (null) { Runtime.trap("Team not found. ") };
       case (?team) { team };
@@ -428,7 +447,6 @@ actor {
   };
 
   public query ({ caller }) func getAllTeams() : async [Team] {
-    // Guests can read
     state.teams.values().toArray().sort(compareByOrder<Team>(func(t) { t.order }));
   };
 

@@ -1,4 +1,3 @@
-import { HttpAgent } from "@icp-sdk/core/agent";
 import { Edit, ImageIcon, Loader2, Plus, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Team } from "../backend";
@@ -14,11 +13,10 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { loadConfig } from "../config";
+import { createStorageClientForUpload } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
-import { StorageClient } from "../utils/StorageClient";
 
 const emptyTeam = (): Team => ({
   id: 0n,
@@ -69,15 +67,7 @@ export default function Teams() {
       if (!file) return;
       setUploadProgress(0);
       try {
-        const config = await loadConfig();
-        const agent = new HttpAgent({ host: config.backend_host });
-        const storageClient = new StorageClient(
-          config.bucket_name,
-          config.storage_gateway_url,
-          config.backend_canister_id,
-          config.project_id,
-          agent,
-        );
+        const storageClient = await createStorageClientForUpload();
         const bytes = new Uint8Array(await file.arrayBuffer());
         const { hash } = await storageClient.putFile(bytes, (pct) =>
           setUploadProgress(pct),

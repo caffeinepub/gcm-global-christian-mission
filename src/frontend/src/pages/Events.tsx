@@ -1,4 +1,3 @@
-import { HttpAgent } from "@icp-sdk/core/agent";
 import {
   CalendarDays,
   Download,
@@ -24,11 +23,10 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { loadConfig } from "../config";
+import { createStorageClientForUpload } from "../config";
 import { useAuth } from "../contexts/AuthContext";
 import { useLang } from "../contexts/LanguageContext";
 import { useActor } from "../hooks/useActor";
-import { StorageClient } from "../utils/StorageClient";
 
 const fmtDate = (ns: bigint) => {
   const ms = Number(ns / 1000000n);
@@ -115,15 +113,7 @@ export default function Events() {
       if (!file.type.startsWith("image/")) return;
       setUploadProgress(0);
       try {
-        const config = await loadConfig();
-        const agent = new HttpAgent({ host: config.backend_host });
-        const storageClient = new StorageClient(
-          config.bucket_name,
-          config.storage_gateway_url,
-          config.backend_canister_id,
-          config.project_id,
-          agent,
-        );
+        const storageClient = await createStorageClientForUpload();
         const bytes = new Uint8Array(await file.arrayBuffer());
         const { hash } = await storageClient.putFile(bytes, (pct) =>
           setUploadProgress(pct),
@@ -154,12 +144,12 @@ export default function Events() {
     };
     try {
       if (isNew) {
-        const newId = await actor.addEvent({
+        await actor.addEvent({
           ...evtToSave,
           id: 0n,
           createdAt: 0n,
+          isPublished: true,
         });
-        await actor.updateEvent({ ...evtToSave, id: newId, isPublished: true });
       } else {
         await actor.updateEvent(evtToSave);
       }
